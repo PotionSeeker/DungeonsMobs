@@ -1,5 +1,4 @@
 /*
-
 The MIT License (MIT)
 
 Copyright (c) 2020 Joseph Bettendorff a.k.a. "Commoble"
@@ -21,8 +20,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
- */
+*/
 
 package net.firefoxsalesman.dungeonsmobs.lib.data.util;
 
@@ -37,17 +35,17 @@ import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.OnDatapackSyncEvent;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.PacketDistributor.PacketTarget;
 import net.minecraftforge.network.simple.SimpleChannel;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Logger; // Use java.util.logging instead of log4j
 
 /**
  * Codec-based data manager for loading data.
@@ -60,18 +58,18 @@ import java.util.function.Function;
 public class CodecJsonDataManager<T> extends SimpleJsonResourceReloadListener {
     // default gson if unspecified
     private static final Gson STANDARD_GSON = new Gson();
-    private static final Logger LOGGER = LogManager.getLogger();
+    private static final Logger LOGGER = Logger.getLogger("DungeonsMobs"); // Use java.util.logging
 
     /**
      * The codec we use to convert jsonelements to Ts
-     **/
+     */
     private final Codec<T> codec;
 
     private final String folderName;
 
     /**
      * The raw data that we parsed from json last time resources were reloaded
-     **/
+     */
     protected Map<ResourceLocation, T> data = new HashMap<>();
 
     /**
@@ -115,22 +113,36 @@ public class CodecJsonDataManager<T> extends SimpleJsonResourceReloadListener {
 
     @Override
     protected void apply(Map<ResourceLocation, JsonElement> jsons, ResourceManager resourceManager, ProfilerFiller profiler) {
-        LOGGER.info("Beginning loading of data for data loader: {}", folderName);
+        boolean isCustomNPCsLoaded = ModList.get().isLoaded("customnpcs");
+        if (!isCustomNPCsLoaded) {
+            LOGGER.info("Beginning loading of data for data loader: {}");
+        } else {
+            LOGGER.fine("CustomNPCs detected, minimizing logging for data loader: {}");
+        }
+
         Map<ResourceLocation, T> newMap = new HashMap<>();
 
         for (Entry<ResourceLocation, JsonElement> entry : jsons.entrySet()) {
             ResourceLocation key = entry.getKey();
             JsonElement element = entry.getValue();
-            // if we fail to parse json, log an error and continue
-            // if we succeeded, add the resulting T to the map
-            codec.decode(JsonOps.INSTANCE, element)
-                    .get()
-                    .ifLeft(result -> newMap.put(key, result.getFirst()))
-                    .ifRight(partial -> LOGGER.error("Failed to parse data json for {} due to: {}", key, partial.message()));
+            try {
+                codec.decode(JsonOps.INSTANCE, element)
+                        .get()
+                        .ifLeft(result -> newMap.put(key, result.getFirst()))
+                        .ifRight(partial -> {
+                            if (!isCustomNPCsLoaded) {
+                                LOGGER.warning("Failed to parse data json for {} due to: {}");
+                            }
+                        });
+            } catch (Exception e) {
+                LOGGER.warning("Exception while decoding JSON for {}: {}");
+            }
         }
 
         data = newMap;
-        LOGGER.info("Data loader for {} loaded {} jsons", folderName, data.size());
+        if (!isCustomNPCsLoaded) {
+            LOGGER.info("Data loader for {} loaded {} jsons");
+        }
     }
 
     /**
@@ -150,7 +162,7 @@ public class CodecJsonDataManager<T> extends SimpleJsonResourceReloadListener {
 
     /**
      * Generate an event listener function for the on-datapack-sync event
-     **/
+     */
     private <PACKET> Consumer<OnDatapackSyncEvent> getDatapackSyncListener(final SimpleChannel channel,
                                                                            final Function<Map<ResourceLocation, T>, PACKET> packetFactory) {
         return event -> {
